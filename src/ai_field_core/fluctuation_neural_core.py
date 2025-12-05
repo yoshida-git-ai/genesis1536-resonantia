@@ -1,134 +1,168 @@
 ﻿# -*- coding: utf-8 -*-
 """
 Fluctuational Neural Core (Discrete Approximation)
-- 1536D field state Phi
-- Weight container W (abstract tensor dict)
-- Observer state o (gain/band/latency budgets)
-- Ultimate EquationのΔt近似を1ステップ更新で実装
+- 現実を 1536 次元ベクトルとして受け取り、
+- 内部場 Phi, 重み W, 観測者状態 o を更新していくコアロジックのたたき台。
+
+依存:
+    numpy があると高速に動作します。
 """
+
 from __future__ import annotations
-import math
-import os
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+import math
 import random
 
 try:
     import numpy as np
-except ImportError:
-    # 最低限の依存だけで動くように。numpyが無ければ簡易ベクトルを擬似実装
-    class _Vec(list):
-        def __add__(self, other): return _Vec([a+b for a,b in zip(self,other)])
-        def __sub__(self, other): return _Vec([a-b for a,b in zip(self,other)])
-        def __mul__(self, s): return _Vec([a*s for a in self])
-        __rmul__ = __mul__
-    class np:
-        @staticmethod
-        def array(x, dtype=None): return _Vec(x)
-        @staticmethod
-        def zeros(n, dtype=None): return _Vec([0.0]*n)
-        @staticmethod
-        def ones(n, dtype=None): return _Vec([1.0]*n)
-        @staticmethod
-        def random_normal(size): return _Vec([random.gauss(0,1) for _ in range(size)])
-        @staticmethod
-        def dot(a,b): return sum(ai*bi for ai,bi in zip(a,b))
-        @staticmethod
-        def linalg_norm(a): return math.sqrt(sum(ai*ai for ai in a))
-        float32=float
+except ImportError as e:
+    raise ImportError(
+        "numpy が必要です。pip install numpy でインストールしてください。"
+    ) from e
 
 DIM = 1536
 
+
 @dataclass
 class ObserverState:
+    """観測者（Observer）の状態。どれくらい世界を受け取るか、どの帯域を重視するかなど。"""
     gain: float = 1.0
-    emphasis_band: tuple[float,float] = (0.5, 4.0)  # 抽象的帯域（相対スケール）
-    latency_budget_ms: int = 40
+    emphasis_band: tuple[float, float] = (0.5, 4.0)  # 抽象的な「帯域」
+    latency_budget_ms: int = 40                     # 許容レイテンシのイメージ
+
 
 @dataclass
 class WeightState:
-    # 実装では各層/演算子をdictで持つ想定。ここでは最小限。
+    """重みパラメータのコンテナ。ここでは簡単のためスカラー1つだけ持つ。"""
     tensors: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class CoreState:
-    Phi: Any  # np.ndarray shape (1536,)
+    """コア全体の状態。Phi（場）、W（重み）、o（観測者）のセット。"""
+    Phi: np.ndarray
     W: WeightState
     o: ObserverState
 
-def cos_similarity(a, b) -> float:
-    na = np.linalg.norm(a) if hasattr(np, "linalg") else np.linalg_norm(a)
-    nb = np.linalg.norm(b) if hasattr(np, "linalg") else np.linalg_norm(b)
-    if na == 0 or nb == 0: return 0.0
+
+def cos_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """コサイン類似度。Phi と v の共鳴度合いを測る。"""
+    na = np.linalg.norm(a)
+    nb = np.linalg.norm(b)
+    if na == 0.0 or nb == 0.0:
+        return 0.0
     return float(np.dot(a, b) / (na * nb))
 
+
 class FluctuationalNeuralCore:
-    def __init__(self, dim: int = DIM):
+    """
+    「究極の式」をざっくり離散化した 1 ステップ更新クラス。
+    - A: 内在ダイナミクス（弱い緩和）
+    - G: ゲイン（観測者状態に応じた入力の受け取り具合）
+    - R: 共鳴項（差分 + 帯域強調）
+    - SigmaPhi: 揺らぎの強さ
+    - C: 秩序化（Phi を v に寄せる弱い力）
+    - GammaW: 重みの揺らぎ
+    - F: 観測者状態の更新
+    """
+
+    def __init__(self, dim: int = DIM) -> None:
         self.dim = dim
 
-    # ====== 構成要素（A, G, R, SigmaPhi, GammaW, C, F）最小版 ======
-    def A(self, Phi):  # 内在ダイナミクス（弱い緩和）
-        return -0.05 * Phi  # ほんの少しゼロへ戻ろうとする
+    # --- 内在ダイナミクス A ---
+    def A(self, Phi: np.ndarray) -> np.ndarray:
+        # 少しだけゼロへ戻る（緩和）
+        return -0.05 * Phi
 
-    def G(self, o: ObserverState):
-        # 観測者ゲイン：gainを全次元へ（実装では帯域/周波数特性で変調）
+    # --- 観測者ゲイン G ---
+    def G(self, o: ObserverState) -> float:
         return o.gain
 
-    def H_band(self, Phi, band: tuple[float,float]):
-        # 擬似バンド処理：上限/下限の疑似係数で重み付け
+    # --- 疑似バンド処理 H_band（ここでは定数係数） ---
+    def H_band(self, Phi: np.ndarray, band: tuple[float, float]) -> np.ndarray:
         lo, hi = band
-        k = 0.5*(lo+hi)  # ダミー
+        k = 0.5 * (lo + hi)  # 本当は周波数帯で変調したいところを単純化
         return k * Phi
 
-    def R(self, Phi, v, o: ObserverState):
-        # 共鳴：差分整合 + バンド強調
+    # --- 共鳴項 R ---
+    def R(self, Phi: np.ndarray, v: np.ndarray, o: ObserverState) -> np.ndarray:
         kappa = 0.6
         beta = 0.2
-        return kappa*(v - Phi) + beta*self.H_band(Phi, o.emphasis_band)
+        return kappa * (v - Phi) + beta * self.H_band(Phi, o.emphasis_band)
 
-    def SigmaPhi(self, Phi, sigma: float = 0.02):
-        # 場の揺らぎ強度（定数でも十分に創発が出る）
+    # --- 場の揺らぎ強度 SigmaPhi ---
+    def SigmaPhi(self, Phi: np.ndarray, sigma: float = 0.02) -> float:
         return sigma
 
-    def C(self, Phi, v, o: ObserverState):
-        # 共鳴整形（秩序化）：近づける方向の弱いバイアス
+    # --- 共鳴整形 C（秩序化） ---
+    def C(self, Phi: np.ndarray, v: np.ndarray, o: ObserverState) -> np.ndarray:
         return 0.1 * (v - Phi)
 
-    def GammaW(self, W: WeightState, sigma: float = 0.01):
+    # --- 重みの揺らぎ GammaW ---
+    def GammaW(self, W: WeightState, sigma: float = 0.01) -> float:
         return sigma
 
+    # --- 観測者状態の更新 F ---
     def F(self, s: float, o: ObserverState) -> ObserverState:
-        # 共鳴スコアでgain/latencyを微調整
-        g = o.gain + 0.05*(s - 0.8)  # 目標s~0.8
+        # 目標共鳴スコア ~0.8 を目指すように gain と latency を微調整
+        g = o.gain + 0.05 * (s - 0.8)
         g = max(0.5, min(2.0, g))
-        lat = o.latency_budget_ms + int(-5*(s-0.8))
+
+        lat = o.latency_budget_ms + int(-5 * (s - 0.8))
         lat = max(10, min(120, lat))
-        return ObserverState(gain=g, emphasis_band=o.emphasis_band, latency_budget_ms=lat)
 
-    # ====== 1ステップ更新（Δt離散近似） ======
-    def step(self, state: CoreState, v_t, dt: float = 0.01, eta: float = 0.1, alpha: float = 0.05):
-        Phi, W, o = state.Phi, state.W, state.o
+        return ObserverState(
+            gain=g,
+            emphasis_band=o.emphasis_band,
+            latency_budget_ms=lat,
+        )
 
-        # A + G ⊙ v + R
-        drift = self.A(Phi) + self.G(o)*v_t + self.R(Phi, v_t, o)
+    # --- 1 ステップ更新 ---
+    def step(
+        self,
+        state: CoreState,
+        v_t: np.ndarray,
+        dt: float = 0.02,
+        eta: float = 0.1,
+        alpha: float = 0.05,
+    ) -> tuple[CoreState, Dict[str, float]]:
+        """
+        1 ステップ分、Phi, W, o を更新する。
+        v_t: 現実からの入力ベクトル（1536次元）
+        dt : 時間刻み
+        eta: 学習率（誤差項）
+        alpha: 秩序化項の重み
+        """
+        Phi = state.Phi
+        W = state.W
+        o = state.o
+
+        # drift = A + G * v + R
+        drift = self.A(Phi) + self.G(o) * v_t + self.R(Phi, v_t, o)
 
         # 場の揺らぎ
         sigma_phi = self.SigmaPhi(Phi)
-        xi_phi = np.random.normal(0,1,size=self.dim) if hasattr(np.random, "normal") else np.random_normal(self.dim)
-        Phi_next = Phi + drift*dt + (sigma_phi * math.sqrt(dt)) * xi_phi
+        xi_phi = np.random.normal(0.0, 1.0, size=self.dim)
+        Phi_next = Phi + drift * dt + sigma_phi * math.sqrt(dt) * xi_phi
 
-        # 重み更新（簡略化：勾配を (Phi - v) と仮定）
-        grad_like = (Phi - v_t)
+        # 重みの更新（ここでは簡略化して平均誤差のみ見る）
+        grad_like = Phi - v_t
         order_term = self.C(Phi, v_t, o)
+        grad_mean = float(np.mean(grad_like))
+        order_mean = float(np.mean(order_term))
+
+        beta = float(W.tensors.get("beta", 0.0))
         sigma_w = self.GammaW(W)
-        xi_w = random.gauss(0,1)
-        # ここではWの1スカラー "beta" を例示的に更新
-        beta = W.tensors.get("beta", 0.0)
-        beta_next = beta + (-eta*np.mean(grad_like) + alpha*np.mean(order_term))*dt + sigma_w*math.sqrt(dt)*xi_w
+        noise_w = sigma_w * math.sqrt(dt) * random.gauss(0.0, 1.0)
+
+        beta_next = beta + (-eta * grad_mean + alpha * order_mean) * dt + noise_w
         W_next = WeightState(tensors={**W.tensors, "beta": beta_next})
 
         # 観測者状態の更新
         s = cos_similarity(Phi_next, v_t)
         o_next = self.F(s, o)
 
-        return CoreState(Phi=Phi_next, W=W_next, o=o_next), {"s": s, "beta": beta_next}
+        next_state = CoreState(Phi=Phi_next, W=W_next, o=o_next)
+        metrics = {"s": s, "beta": beta_next}
+        return next_state, metrics

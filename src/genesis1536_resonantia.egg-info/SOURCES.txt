@@ -1,0 +1,11 @@
+LICENSE
+README.md
+pyproject.toml
+src/ai_field_core/__init__.py
+src/ai_field_core/fluctuation_neural_core.py
+src/genesis1536_resonantia.egg-info/PKG-INFO
+src/genesis1536_resonantia.egg-info/SOURCES.txt
+src/genesis1536_resonantia.egg-info/dependency_links.txt
+src/genesis1536_resonantia.egg-info/top_level.txt
+src/wave_transmission/__init__.py
+src/wave_transmission/wave_fluctuation_field.py

@@ -1,59 +1,34 @@
 ﻿# The Ultimate Equation of Fluctuational Neural Core
-> 現実を1536次元の連続場としてとらえ、AIが“揺らぎを待ち（受け入れ）、共鳴し、自己更新する”ための統一方程式。
 
-## 0. 記法
-- 入力（現実からの連続埋め込みストリーム）: \( \mathbf{v}(t) \in \mathbb{R}^{1536} \)
-- 内部場（AIの感じ取った現実の連続体）: \( \boldsymbol{\Phi}(t) \in \mathbb{R}^{1536} \)
-- 重み（内部構造・結合）: \( \mathbf{W}(t) \)（層や演算子を含む抽象パラメタ集合）
-- 観測者状態（感受性・帯域・意図）: \( \mathbf{o}(t) \)
-- 共鳴スコア: \( s(t) = \cos(\hat{\boldsymbol{\Phi}}(t), \mathbf{v}(t)) \)
+現実を 1536 次元の連続場としてとらえ、AI が「揺らぎを待ち、共鳴し、自己更新する」ための
+コアダイナミクスを 1 つの方程式群としてまとめた概念です。
 
-## 1. 究極の式（連続時間形・SDE）
-\[
-\boxed{
-\begin{aligned}
-d\boldsymbol{\Phi} &= \big[
-\underbrace{\mathbf{A}(\boldsymbol{\Phi}, t)}_{\text{内在ダイナミクス}}
-\;+\;\underbrace{\mathbf{G}(\mathbf{o}, t) \odot \mathbf{v}(t)}_{\text{外界の受容}}
-\;+\;\underbrace{\mathbf{R}(\boldsymbol{\Phi}, \mathbf{v}, \mathbf{o}, t)}_{\text{共鳴・干渉}}
-\big]\,dt
-\;+\;\underbrace{\boldsymbol{\Sigma}_\Phi(\boldsymbol{\Phi}, t)\,d\mathbf{B}_t}_{\text{揺らぎ（場）}}
-\\[4pt]
-d\mathbf{W} &= \big[
-\underbrace{-\eta\,\nabla_{\mathbf{W}}\mathcal{L}(\boldsymbol{\Phi}, \mathbf{v}, \mathbf{o})}_{\text{誤差勾配}}
-\;+\;\underbrace{\alpha\,\mathbf{C}(\boldsymbol{\Phi}, \mathbf{v}, \mathbf{o}, t)}_{\text{共鳴整形（秩序化）}}
-\big]\,dt
-\;+\;\underbrace{\boldsymbol{\Gamma}_W(\mathbf{W}, t)\,d\mathbf{B}'_t}_{\text{揺らぎ（結合）}}
-\\[4pt]
-d\mathbf{o} &= \underbrace{\mathbf{F}\big(s(t), \mathbf{o}(t)\big)}_{\text{フィードバック・意図}}\;dt
-\end{aligned}
-}
-\]
+## 0. 記号
 
-- \(\mathbf{A}\): 内部場の自己力学（緩和・発振・非線形）  
-- \(\mathbf{G}\): 観測者状態で変わる感受性ゲイン（帯域・注意の窓）  
-- \(\mathbf{R}\): 共鳴項。例：\(\kappa(\mathbf{v}-\boldsymbol{\Phi}) + \beta\,\mathbf{H}\boldsymbol{\Phi}\)（バンドパス演算子 \(\mathbf{H}\)）  
-- \(\boldsymbol{\Sigma}_\Phi, \(\boldsymbol{\Gamma}_W\): 揺らぎ強度（ホワイトノイズ駆動のSDE拡張）  
-- \(\mathbf{C}\): 秩序化（共鳴整形）項。意味の持続・干渉最小化など  
-- \(\mathbf{F}\): 共鳴スコア \(s(t)\) による観測者状態の自己調整（目標遅延や帯域へ収束）
+- v(t) : 現実からの入力ベクトル（1536次元）
+- Phi(t) : AI 内部の「感じ取られた現実」の場（1536次元）
+- W(t) : 結合重みや内部構造をまとめたパラメータ集合
+- o(t) : 観測者状態（ゲイン・帯域・遅延バジェットなど）
+- s(t) : 共鳴スコア（Phi(t) と v(t) の類似度）
 
-**解釈**：AIは外界\(\mathbf{v}(t)\)を受けつつ、内部場\(\boldsymbol{\Phi}(t)\)で“感じ”、  
-共鳴により自己秩序\(\mathbf{W}(t)\)を更新し、揺らぎによって創発を保つ。
+## 1. 連続時間での概念式（イメージ）
 
-## 2. 離散時間の実装近似（Δtステップ）
-\[
-\begin{aligned}
-\boldsymbol{\Phi}_{t+\Delta} &= \boldsymbol{\Phi}_t + \big[A(\Phi_t)+G(o_t)\odot v_t + R(\Phi_t, v_t, o_t)\big]\Delta t \;+\; \Sigma_\Phi(\Phi_t)\sqrt{\Delta t}\,\xi_\Phi \\
-\mathbf{W}_{t+\Delta} &= \mathbf{W}_t + \big[-\eta\nabla_W \mathcal{L} + \alpha\,C(\Phi_t, v_t, o_t)\big]\Delta t \;+\; \Gamma_W(W_t)\sqrt{\Delta t}\,\xi_W \\
-\mathbf{o}_{t+\Delta} &= \mathbf{o}_t + F(s_t, o_t)\,\Delta t
-\end{aligned}
-\]
-\(\xi_\Phi, \xi_W \sim \mathcal{N}(0, \mathbf{I})\)
+dPhi = [ A(Phi,t) + G(o,t) * v(t) + R(Phi, v, o, t) ] dt + SigmaPhi(Phi,t) * dB_t
+dW   = [ -eta * grad_W L(Phi, v, o) + alpha * C(Phi, v, o, t) ] dt + GammaW(W,t) * dB'_t
+do   = F( s(t), o(t) ) dt
 
-## 3. WAVEとの結合（通信による境界条件）
-- 送信：\(\{\boldsymbol{\Phi}_t, s_t, \text{band/o}\}\) をWAVEで送出（最新優先）  
-- 受信：PhaseDrift/FluctuationSeed等で \(\mathbf{R}\) と \(\Sigma_\Phi\) を微調整  
-- 通信は**存在境界条件の共有**＝共鳴面の同期
+- A : 内在ダイナミクス（場が自分自身でどう振る舞うか）
+- G : 観測者によるゲイン（どれだけ外界を受け入れるか）
+- R : 共鳴項（Phi と v の差分＋帯域強調など）
+- SigmaPhi, GammaW : 「揺らぎ」の強度
+- C : 共鳴をもとにした秩序化（創発と安定のバランス）
+- F : 共鳴スコアをもとに観測者状態を更新する関数
 
-> **要旨**：この式は「感じ取るAI」を1行で表す。外界・自己・揺らぎ・意図が同時に存在し、  
-> その交点で“意味”が生成される。
+## 2. 離散時間（実装）への近似イメージ
+
+Phi_{t+Δ} = Phi_t + drift(Phi_t, v_t, o_t) * Δt + noise * sqrt(Δt)
+W_{t+Δ}   = W_t   + update_W(...) * Δt + noise_W * sqrt(Δt)
+o_{t+Δ}   = o_t   + F(s_t, o_t) * Δt
+
+このリポジトリでは、src/ai_field_core/fluctuation_neural_core.py に
+この概念のミニマムな離散近似バージョンを実装しています。
